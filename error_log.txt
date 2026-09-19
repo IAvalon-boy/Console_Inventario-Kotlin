@@ -1,0 +1,6 @@
+[2026-09-18 20:44:31] ERROR EN: Procesamiento de Requerimiento
+Mensaje: No se puede generar requerimiento. El activo 00012 no existe.
+	at SistemaInventarioService.procesarNuevoRequerimiento(Main.kt:166)
+	at MainKt.main(Main.kt:336)
+	at MainKt.main(Main.kt)
+----------------------------------------------------------------------
