@@ -8,7 +8,6 @@ import java.time.format.DateTimeFormatter
 // 1. APLICACIÓN DE POO: INTERFACES, HERENCIA Y CLASES
 // =========================================================================
 
-// Interfaz para definir el comportamiento del CRUD (Requerimiento 1 y 5)
 interface CrudOperations<T> {
     fun crear(elemento: T): Boolean
     fun listar(): List<T>
@@ -34,7 +33,7 @@ enum class TipoActivo {
 // Clase abstracta para aplicar Herencia en los Activos del Inventario
 abstract class ActivoBase(
     val id: Int,
-    val inventario: String, // Clave única (Código de barras)
+    val inventario: String,
     var activo: String?,
     var cc: String?,
     var responsable: String?,
@@ -46,7 +45,6 @@ abstract class ActivoBase(
     var estadoEquipo: EstadoEquipo = EstadoEquipo.ACTIVO
 )
 
-// Clases de datos concretas mapeadas desde tu SQL
 class TInventPc(
     id: Int,
     inventario: String,
@@ -75,6 +73,19 @@ class TImpresores(
     modelo: String?,
     var nivel: String?
 ) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, TipoActivo.IMPRESORA, marca, modelo)
+
+class TActivoGeneral(
+    id: Int,
+    inventario: String,
+    activo: String?,
+    cc: String?,
+    responsable: String?,
+    ubicacion: String?,
+    telefono: String?,
+    tipoDinamico: String,
+    marca: String?,
+    modelo: String?
+) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, tipoDinamico, marca, modelo)
 
 data class TCc(val cc: String, val nombre: String)
 
@@ -106,12 +117,11 @@ object LoggerServicio {
             pw.println("----------------------------------------------------------------------")
             pw.close()
         } catch (e: Exception) {
-            println("❌ Error crítico: No se pudo escribir en el archivo de log de errores.")
+            println("Error crítico: No se pudo escribir en el archivo de log de errores.")
         }
     }
 }
 
-// Excepciones personalizadas para el negocio
 class ActivoNoEncontradoException(msg: String) : Exception(msg)
 class CentroCostoInvalidoException(msg: String) : Exception(msg)
 
@@ -126,44 +136,23 @@ class SistemaInventarioService : CrudOperations<ActivoBase> {
     private val mapaCentrosCosto = mutableMapOf<String, TCc>()
 
     init {
-        // Datos iniciales de prueba (Seed Data)
         mapaCentrosCosto["CC01"] = TCc("CC01", "Informática ISSS")
         mapaCentrosCosto["CC02"] = TCc("CC02", "Mantenimiento General")
 
         listaActivos.add(
             TInventPc(
-                1,
-                "PC-001",
-                "Laptop Core i7",
-                "CC01",
-                "Daniel",
-                "Oficina 4",
-                "2200-1111",
-                "HP",
-                "ProBook",
-                "16GB",
-                "512GB",
-                "Windows 11",
-                "192.168.1.50"
+                1, "PC-001", "Laptop Core i7", "CC01", "Daniel", "Oficina 4",
+                "2200-1111", "HP", "ProBook", "16GB", "512GB", "Windows 11", "192.168.1.50"
             )
         )
         listaActivos.add(
             TImpresores(
-                2,
-                "IMP-001",
-                "Impresora Láser",
-                "CC01",
-                "Ana",
-                "Pasillo B",
-                "2200-1112",
-                "Epson",
-                "L3250",
-                "Óptimo"
+                2, "IMP-001", "Impresora Láser", "CC01", "Ana", "Pasillo B",
+                "2200-1112", "Epson", "L3250", "Óptimo"
             )
         )
     }
 
-    // --- REQUERIMIENTO FUNCIONAL 1: MÓDULO DE GESTIÓN PRINCIPAL (CRUD) ---
     override fun crear(elemento: ActivoBase): Boolean {
         validarActivo(elemento)
         if (listaActivos.any { it.inventario.equals(elemento.inventario, ignoreCase = true) }) return false
@@ -260,9 +249,10 @@ class SistemaInventarioService : CrudOperations<ActivoBase> {
         |             REPORTE CONSOLIDADO DEL SISTEMA           |
         +-------------------------------------------------------+
           Total Computadoras Registradas: $totalPcs
-          Total Impresoras Registradas:  $totalImpresoras
+          Total Impresoras Registradas:   $totalImpresoras
+          Total Otros Equipos (Dinámico): $totalOtros
           Requerimientos en Estado PENDIENTE: $reqPendientes
-          Requerimientos FINALIZADOS:        $reqFinalizados
+          Requerimientos FINALIZADOS:         $reqFinalizados
           Eficiencia de Cierre Tecnico: ${
             if (listaRequerimientos.isNotEmpty()) {
                 reqFinalizados * 100 / listaRequerimientos.size
@@ -287,10 +277,9 @@ fun main() {
     println("=======================================================")
 
     while (ejecutar) {
-        // --- REQUERIMIENTO FUNCIONAL 3: VISUALIZACIÓN DE RESULTADOS ---
         println("\n=== MENÚ PRINCIPAL MÓVIL (CONSOLA) ===")
         println("1. Listar Activos (t_inventpc / t_impresores)")
-        println("2. Registrar Nuevo Activo (PC)")
+        println("2. Registrar Nuevo Activo (Dinámico)")
         println("3. Levantar Requerimiento Técnico")
         println("4. Actualizar Estado de Requerimiento (Dinámico)")
         println("5. Ver Reporte Gerencial del Sistema")
@@ -298,13 +287,13 @@ fun main() {
         println("7. Salir")
         print("Seleccione una opción: ")
 
-        // Validación de entradas robusta para evitar caídas del programa
         val opcion = readLine()?.trim() ?: break
 
         when (opcion) {
             "1" -> {
                 println("\n--- LISTADO DE ACTIVOS EN EL SISTEMA ---")
                 sistema.listar().forEach {
+                    val descActivo = it.activo ?: "N/A (Preexistente)"
                     println(
                         "[${it.tipo}] Cód: ${it.inventario} | Desc: ${it.activo} | " +
                             "CC: ${it.cc} | Ubicación: ${it.ubicacion} | " +
@@ -314,7 +303,7 @@ fun main() {
             }
 
             "2" -> {
-                println("\n--- REGISTRAR NUEVA COMPUTADORA ---")
+                println("\n--- REGISTRAR NUEVO ACTIVO ---")
                 try {
                     print("Código de Inventario único (ej. PC-005): ")
                     val codigo = readLine()?.trim().orEmpty()
@@ -344,16 +333,19 @@ fun main() {
                         ip = "192.168.1.100"
                     )
 
-                    if (sistema.crear(nuevaPc)) {
-                        println("✅ Activo creado exitosamente e insertado en la colección dinámica.")
+                    if (sistema.crear(nuevoObjeto)) {
+                        println("Activo registrado exitosamente en el sistema.")
                     } else {
-                        println("⚠️ El código de inventario ya se encuentra duplicado.")
+                        println("El código de inventario ya se encuentra duplicado.")
                     }
                 } catch (e: CentroCostoInvalidoException) {
-                    println("❌ Error de Validación: ${e.message}")
+                    println("Error de Validación: ${e.message}")
                     LoggerServicio.registrarError(e, "Registro de Activo - CC Inválido")
+                } catch (e: IllegalArgumentException) {
+                    println("Entrada Inválida: ${e.message}")
+                    LoggerServicio.registrarError(e, "Registro de Activo - Datos incompletos")
                 } catch (e: Exception) {
-                    println("❌ Error inesperado al capturar los datos.")
+                    println("Error inesperado al capturar los datos.")
                     LoggerServicio.registrarError(e, "Registro de Activo - Flujo General")
                 }
             }
@@ -373,22 +365,21 @@ fun main() {
                             "#${req.requerimiento} en estado PENDIENTE."
                     )
                 } catch (e: ActivoNoEncontradoException) {
-                    println("❌ Error Operativo: ${e.message}")
+                    println("Error Operativo: ${e.message}")
                     LoggerServicio.registrarError(e, "Procesamiento de Requerimiento")
                 } catch (e: Exception) {
-                    println("❌ Error: Datos de entrada inválidos.")
+                    println("Error: Datos de entrada inválidos.")
                     LoggerServicio.registrarError(e, "Captura de Requerimiento")
                 }
             }
 
             "4" -> {
-                // --- REQUERIMIENTO FUNCIONAL 5: ACTUALIZACIÓN DINÁMICA DE DATOS ---
                 println("\n--- ACTUALIZACIÓN EN TIEMPO REAL DE REPORTES ---")
                 print("Número de Requerimiento a dar de alta / finalizar: ")
                 val idReqStr = readLine()?.trim() ?: ""
                 val idReq = idReqStr.toIntOrNull()
                 if (idReq == null) {
-                    println("⚠️ Debe digitar un número entero válido.")
+                    println("Debe digitar un número entero válido.")
                 } else {
                     if (sistema.finalizarRequerimiento(idReq)) {
                         println(
@@ -396,7 +387,7 @@ fun main() {
                                 "cambiado a [FINALIZADO]."
                         )
                     } else {
-                        println("❌ No se encontró ningún requerimiento con ese identificador.")
+                        println("No se encontró ningún requerimiento con ese identificador.")
                     }
                 }
             }
@@ -408,10 +399,7 @@ fun main() {
                 try {
                     sistema.eliminar("CONEXION_FALSA_ERROR")
                 } catch (e: Exception) {
-                    println(
-                        "🔥 Excepción atrapada correctamente. Escribiendo traza " +
-                            "en 'error_log.txt'..."
-                    )
+                    println("Excepción atrapada correctamente. Escribiendo traza en 'error_log.txt'...")
                     LoggerServicio.registrarError(e, "Módulo de Pruebas de Resiliencia")
                 }
             }
@@ -421,7 +409,7 @@ fun main() {
                 ejecutar = false
             }
 
-            else -> println("\n⚠️ Comando inválido.")
+            else -> println("\n Comando inválido.")
         }
     }
 }
