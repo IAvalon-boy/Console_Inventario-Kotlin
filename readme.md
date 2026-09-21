@@ -153,7 +153,7 @@ Se definen dos excepciones de negocio:
 | Oscar Daniel Diaz Hernandez          | DH252726      |
 | Henry Mauricio Peña Ramírez          | PR251335      |
 | Manuel Alberto Mata Duran            | MD130678      |
-| krissia Lissette Eguizabal Fernandez | EF251345      |
+| Krissia Lissette Eguizabal Fernandez | EF251345      |
 
 
 
