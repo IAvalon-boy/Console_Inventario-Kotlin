@@ -15,6 +15,22 @@ interface CrudOperations<T> {
     fun eliminar(id: String): Boolean
 }
 
+enum class EstadoEquipo {
+    ACTIVO,
+    BAJA
+}
+
+enum class EstadoRequerimiento {
+    PENDIENTE,
+    FINALIZADO
+}
+
+enum class TipoActivo {
+    PC,
+    IMPRESORA
+}
+
+// Clase abstracta para aplicar Herencia en los Activos del Inventario
 abstract class ActivoBase(
     val id: Int,
     val inventario: String,
@@ -23,10 +39,10 @@ abstract class ActivoBase(
     var responsable: String?,
     var ubicacion: String?,
     var telefono: String?,
-    val tipo: String,
+    val tipo: TipoActivo,
     var marca: String?,
     var modelo: String?,
-    var estadoEquipo: Int = 1
+    var estadoEquipo: EstadoEquipo = EstadoEquipo.ACTIVO
 )
 
 class TInventPc(
@@ -43,7 +59,7 @@ class TInventPc(
     var hdd: String?,
     var os: String?,
     var ip: String?
-) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, "PC", marca, modelo)
+) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, TipoActivo.PC, marca, modelo)
 
 class TImpresores(
     id: Int,
@@ -56,7 +72,7 @@ class TImpresores(
     marca: String?,
     modelo: String?,
     var nivel: String?
-) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, "IMPRESORA", marca, modelo)
+) : ActivoBase(id, inventario, activo, cc, responsable, ubicacion, telefono, TipoActivo.IMPRESORA, marca, modelo)
 
 class TActivoGeneral(
     id: Int,
@@ -79,7 +95,8 @@ data class TRequerimiento(
     val cc: String?,
     val responsable: String?,
     val falla: String,
-    var estatus: String = "PENDIENTE",
+    val usuarioRegistro: String,
+    var estatus: EstadoRequerimiento = EstadoRequerimiento.PENDIENTE,
     val insertdate: LocalDate = LocalDate.now()
 )
 
@@ -112,9 +129,11 @@ class CentroCostoInvalidoException(msg: String) : Exception(msg)
 // 3. MANEJO DE COLECCIONES Y LÓGICA DE NEGOCIO CENTRAL
 // =========================================================================
 class SistemaInventarioService : CrudOperations<ActivoBase> {
-    val listaActivos = mutableListOf<ActivoBase>()
-    val listaRequerimientos = mutableListOf<TRequerimiento>()
-    val mapaCentrosCosto = mutableMapOf<String, TCc>()
+
+    // Uso de colecciones mutables (Listas y Mapas) para gestionar el estado dinámico
+    private val listaActivos = mutableListOf<ActivoBase>()
+    private val listaRequerimientos = mutableListOf<TRequerimiento>()
+    private val mapaCentrosCosto = mutableMapOf<String, TCc>()
 
     init {
         mapaCentrosCosto["CC01"] = TCc("CC01", "Informática ISSS")
@@ -135,19 +154,22 @@ class SistemaInventarioService : CrudOperations<ActivoBase> {
     }
 
     override fun crear(elemento: ActivoBase): Boolean {
-        if (listaActivos.any { it.inventario == elemento.inventario }) return false
-        if (elemento.cc != null && !mapaCentrosCosto.containsKey(elemento.cc)) {
-            throw CentroCostoInvalidoException("El Centro de Costo ${elemento.cc} no está registrado en la tabla t_cc.")
-        }
+        validarActivo(elemento)
+        if (listaActivos.any { it.inventario.equals(elemento.inventario, ignoreCase = true) }) return false
         return listaActivos.add(elemento)
     }
 
-    override fun listar(): List<ActivoBase> = listaActivos
+    override fun listar(): List<ActivoBase> = listaActivos.toList()
 
     override fun actualizar(id: String, elemento: ActivoBase): Boolean {
         val indice = listaActivos.indexOfFirst { it.inventario == id }
         if (indice == -1) {
             throw ActivoNoEncontradoException("El activo con código $id no existe en el sistema.")
+        }
+
+        validarActivo(elemento)
+        if (listaActivos.any { it.inventario == elemento.inventario && it.inventario != id }) {
+            throw IllegalArgumentException("El código de inventario ya pertenece a otro activo.")
         }
         listaActivos[indice] = elemento
         return true
@@ -161,29 +183,66 @@ class SistemaInventarioService : CrudOperations<ActivoBase> {
         return eliminado
     }
 
-    fun procesarNuevoRequerimiento(codigoInventario: String, falla: String, usuario: String): TRequerimiento {
-        val activoAsociado = listaActivos.find { it.inventario == codigoInventario }
-            ?: throw ActivoNoEncontradoException("No se puede generar requerimiento. El activo $codigoInventario no existe.")
+    // --- REQUERIMIENTO FUNCIONAL 2: MÓDULO DE PROCESAMIENTO / CÁLCULO ---
+    fun procesarNuevoRequerimiento(
+        codigoInventario: String,
+        falla: String,
+        usuario: String
+    ): TRequerimiento {
+        val codigoNormalizado = codigoInventario.trim()
+        val fallaNormalizada = falla.trim()
+        val usuarioNormalizado = usuario.trim()
+        require(codigoNormalizado.isNotBlank()) { "El código de inventario es obligatorio." }
+        require(fallaNormalizada.isNotBlank()) { "La descripción de la falla es obligatoria." }
+        require(usuarioNormalizado.isNotBlank()) { "El usuario que registra el requerimiento es obligatorio." }
+
+        val activoAsociado = listaActivos.find { it.inventario == codigoNormalizado }
+            ?: throw ActivoNoEncontradoException(
+                "No se puede generar requerimiento. El activo $codigoNormalizado no existe."
+            )
 
         val nuevoId = (listaRequerimientos.maxOfOrNull { it.requerimiento } ?: 0) + 1
         val nuevoReq = TRequerimiento(
             requerimiento = nuevoId,
-            inventario = codigoInventario,
+            inventario = codigoNormalizado,
             cc = activoAsociado.cc,
             responsable = activoAsociado.responsable,
-            falla = falla
+            falla = fallaNormalizada,
+            usuarioRegistro = usuarioNormalizado
         )
         listaRequerimientos.add(nuevoReq)
         return nuevoReq
     }
 
+    fun siguienteIdActivo(): Int = (listaActivos.maxOfOrNull { it.id } ?: 0) + 1
+
+    fun finalizarRequerimiento(id: Int): Boolean {
+        val requerimiento = listaRequerimientos.find { it.requerimiento == id } ?: return false
+        requerimiento.estatus = EstadoRequerimiento.FINALIZADO
+        return true
+    }
+
+    private fun validarActivo(elemento: ActivoBase) {
+        require(elemento.inventario.isNotBlank()) { "El código de inventario es obligatorio." }
+        require(!elemento.activo.isNullOrBlank()) { "La descripción del activo es obligatoria." }
+        require(!elemento.ubicacion.isNullOrBlank()) { "La ubicación del activo es obligatoria." }
+        require(!elemento.marca.isNullOrBlank()) { "La marca del activo es obligatoria." }
+        require(!elemento.modelo.isNullOrBlank()) { "El modelo del activo es obligatorio." }
+
+        val centroCosto = elemento.cc?.trim()
+        if (!centroCosto.isNullOrEmpty() && !mapaCentrosCosto.containsKey(centroCosto)) {
+            throw CentroCostoInvalidoException(
+                "El Centro de Costo $centroCosto no está registrado en la tabla t_cc."
+            )
+        }
+    }
+
+    // --- REQUERIMIENTO FUNCIONAL 4: GENERACIÓN DE REPORTE O RESUMEN ---
     fun generarReporteResumen(): String {
-        val totalPcs = listaActivos.count { it.tipo == "PC" }
-        val totalImpresoras = listaActivos.count { it.tipo == "IMPRESORA" }
-        // Agregamos el conteo de todo lo que sea un equipo dinámico (Monitores, UPS, etc.)
-        val totalOtros = listaActivos.count { it.tipo != "PC" && it.tipo != "IMPRESORA" }
-        val reqPendientes = listaRequerimientos.count { it.estatus == "PENDIENTE" }
-        val reqFinalizados = listaRequerimientos.count { it.estatus == "FINALIZADO" }
+        val totalPcs = listaActivos.count { it.tipo == TipoActivo.PC }
+        val totalImpresoras = listaActivos.count { it.tipo == TipoActivo.IMPRESORA }
+        val reqPendientes = listaRequerimientos.count { it.estatus == EstadoRequerimiento.PENDIENTE }
+        val reqFinalizados = listaRequerimientos.count { it.estatus == EstadoRequerimiento.FINALIZADO }
 
         return """
         +-------------------------------------------------------+
@@ -236,9 +295,9 @@ fun main() {
                 sistema.listar().forEach {
                     val descActivo = it.activo ?: "N/A (Preexistente)"
                     println(
-                        "[${it.tipo}] Cód: ${it.inventario} | Activo: $descActivo | " +
-                                "CC: ${it.cc} | Ubicación: ${it.ubicacion} | " +
-                                "Estado: ${if (it.estadoEquipo == 1) "Activo" else "Baja"}"
+                        "[${it.tipo}] Cód: ${it.inventario} | Desc: ${it.activo} | " +
+                            "CC: ${it.cc} | Ubicación: ${it.ubicacion} | " +
+                            "Estado: ${it.estadoEquipo}"
                     )
                 }
             }
@@ -246,68 +305,33 @@ fun main() {
             "2" -> {
                 println("\n--- REGISTRAR NUEVO ACTIVO ---")
                 try {
-                    println("¿Qué tipo de equipo desea registrar?")
-                    println("1. Computadora (PC)")
-                    println("2. Impresora")
-                    println("3. Otro Hardware (UPS, Monitor, Switch, etc.)")
-                    print("Seleccione una opción (1/2/3): ")
-                    val tipoOpcion = readlnOrNull()?.trim() ?: "3"
-
-                    var tipoDinamicoStr = "GENÉRICO"
-                    if (tipoOpcion == "3") {
-                        print("Especifique el tipo de equipo (ej. UPS, Monitor, Teléfono): ")
-                        tipoDinamicoStr = readlnOrNull()?.trim()?.uppercase() ?: "GENÉRICO"
-                    }
-
-                    print("¿Estado de catalogación? (P) Preexistente / (N) Nueva Adquisición: ")
-                    val estadoEquipo = readlnOrNull()?.trim()?.uppercase() ?: "P"
-
-                    print("Código de Inventario único (ej. INV-001): ")
-                    val codigoInv = readlnOrNull()?.trim()
-                    if (codigoInv.isNullOrEmpty()) {
-                        throw IllegalArgumentException("El código de inventario no puede estar vacío.")
-                    }
-
-                    var numeroActivo: String? = null
-                    if (estadoEquipo == "N") {
-                        print("Número de Activo Institucional (Obligatorio): ")
-                        numeroActivo = readlnOrNull()?.trim()
-                        if (numeroActivo.isNullOrEmpty()) {
-                            throw IllegalArgumentException("Las nuevas adquisiciones requieren Número de Activo.")
-                        }
-                    } else {
-                        println("Equipo preexistente. Omitiendo captura de Número de Activo.")
-                    }
-
-                    print("Marca: ")
-                    val marcaInput = readlnOrNull()?.trim() ?: "Genérica"
-                    print("Modelo: ")
-                    val modeloInput = readlnOrNull()?.trim() ?: "Estándar"
+                    print("Código de Inventario único (ej. PC-005): ")
+                    val codigo = readLine()?.trim().orEmpty()
+                    require(codigo.isNotBlank()) { "El código no puede estar vacío" }
+                    print("Nombre descriptivo del activo: ")
+                    val nombre = readLine()?.trim()
                     print("Centro de Costo (ej. CC01 o CC02): ")
-                    val ccInput = readlnOrNull()?.trim() ?: ""
+                    val ccInput = readLine()?.trim()?.ifBlank { null }
                     print("Responsable asignado: ")
-                    val resp = readlnOrNull()
+                    val resp = readLine()?.trim()
                     print("Ubicación física: ")
-                    val ubi = readlnOrNull()
+                    val ubi = readLine()?.trim()
 
-                    val nuevoId = sistema.listaActivos.size + 1
-                    val nuevoObjeto: ActivoBase = when (tipoOpcion) {
-                        "1" -> {
-                            print("Memoria RAM (ej. 8GB): ")
-                            val ramIn = readlnOrNull()?.trim()
-                            print("Disco Duro (ej. 256GB SSD): ")
-                            val hddIn = readlnOrNull()?.trim()
-                            TInventPc(nuevoId, codigoInv, numeroActivo, ccInput, resp, ubi, "2200-0000", marcaInput, modeloInput, ramIn, hddIn, "Windows 11", "DHCP")
-                        }
-                        "2" -> {
-                            print("Nivel de tóner actual (ej. 100%): ")
-                            val nivelIn = readlnOrNull()?.trim()
-                            TImpresores(nuevoId, codigoInv, numeroActivo, ccInput, resp, ubi, "2200-0000", marcaInput, modeloInput, nivelIn)
-                        }
-                        else -> {
-                            TActivoGeneral(nuevoId, codigoInv, numeroActivo, ccInput, resp, ubi, "2200-0000", tipoDinamicoStr, marcaInput, modeloInput)
-                        }
-                    }
+                    val nuevaPc = TInventPc(
+                        id = sistema.siguienteIdActivo(),
+                        inventario = codigo,
+                        activo = nombre,
+                        cc = ccInput,
+                        responsable = resp,
+                        ubicacion = ubi,
+                        telefono = "2200-0000",
+                        marca = "Dell",
+                        modelo = "Optiplex",
+                        ram = "8GB",
+                        hdd = "256GB SSD",
+                        os = "Windows 11",
+                        ip = "192.168.1.100"
+                    )
 
                     if (sistema.crear(nuevoObjeto)) {
                         println("Activo registrado exitosamente en el sistema.")
@@ -330,14 +354,16 @@ fun main() {
                 println("\n--- LEVANTAR REQUERIMIENTO TÉCNICO ---")
                 try {
                     print("Ingrese el código de barras/inventario del hardware: ")
-                    val cod = readLine()?.trim() ?: ""
+                    val cod = readLine()?.trim().orEmpty()
                     print("Describa detalladamente la falla detectada: ")
-                    val falla = readLine()?.trim() ?: ""
-                    if (falla.isEmpty()) {
-                        throw IllegalArgumentException("La descripción del daño no puede guardarse en blanco.")
-                    }
-                    val req = sistema.procesarNuevoRequerimiento(cod, falla, "admin")
-                    println("Transacción exitosa. Requerimiento registrado con ID #${req.requerimiento} en estado PENDIENTE.")
+                    val falla = readLine()?.trim().orEmpty()
+                    print("Usuario que registra el requerimiento: ")
+                    val usuario = readLine()?.trim().orEmpty()
+                    val req = sistema.procesarNuevoRequerimiento(cod, falla, usuario)
+                    println(
+                        "✅ Transacción exitosa. Requerimiento registrado con ID " +
+                            "#${req.requerimiento} en estado PENDIENTE."
+                    )
                 } catch (e: ActivoNoEncontradoException) {
                     println("Error Operativo: ${e.message}")
                     LoggerServicio.registrarError(e, "Procesamiento de Requerimiento")
@@ -355,10 +381,11 @@ fun main() {
                 if (idReq == null) {
                     println("Debe digitar un número entero válido.")
                 } else {
-                    val reqModificar = sistema.listaRequerimientos.find { it.requerimiento == idReq }
-                    if (reqModificar != null) {
-                        reqModificar.estatus = "FINALIZADO"
-                        println("Estado modificado en vivo. Requerimiento #$idReq cambiado a [FINALIZADO].")
+                    if (sistema.finalizarRequerimiento(idReq)) {
+                        println(
+                                "✅ Estado modificado en vivo. Requerimiento #$idReq " +
+                                "cambiado a [FINALIZADO]."
+                        )
                     } else {
                         println("No se encontró ningún requerimiento con ese identificador.")
                     }
